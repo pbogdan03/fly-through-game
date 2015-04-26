@@ -1,0 +1,300 @@
+<html>
+<head>
+  <title>WebSockets</title>
+    <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, user-scalable=no">
+  <meta name="msapplication-tap-highlight" content="no" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0" />
+
+    <script src="//ajax.googleapis.com/ajax/libs/jquery/1.7.2/jquery.min.js"></script>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="//threejs.org/build/three.min.js"></script>
+    <!--script src="http://charliejwalter.net/librarys/three.min.r67.js"></script-->
+    <script src="//davidshimjs.github.com/qrcodejs/qrcode.min.js"></script>
+    <style>
+      html{
+        -ms-touch-action: none;
+        -ms-user-select: none;
+      }
+
+      body{
+        margin: 0;
+        overflow: hidden;
+        height: 100%;
+        background: grey;
+      }
+
+      #qrcode{
+        position: absolute;
+        padding: 1em;
+        background: white;
+      }
+
+      #qrcode img{
+        width: 200px;
+        height: 200px;
+      }
+    </style>
+</head>
+<body>
+
+  <div id="qrcode"></div>
+
+  <div id="controller" style="display:none;"></div>
+
+</body>
+<script>
+
+var
+controller = function(playerid){
+
+  //
+  var iosocket = io.connect();
+  iosocket.on('connect', function () {
+
+    iosocket.emit('connectNewControllerFor', playerid)
+
+    iosocket.on('controllerConnected', function(success){
+
+      if(success){
+
+        var controllerState = {
+
+          a: false,
+          accel: {}
+        }
+
+        touchstart = function(e){
+
+          e.preventDefault();
+          e.stopPropagation();
+          e.cancelBubble = true;
+          e.returnValue = false;
+
+          e.preventDefault();
+          controllerState.a = true;
+
+          iosocket.emit('controllerStateChange', { playerid: playerid, controllerState: controllerState });
+
+        }
+
+        touchend = function(e){
+
+          e.preventDefault && e.preventDefault();
+          e.stopPropagation && e.stopPropagation();
+          e.cancelBubble = true;
+          e.returnValue = false;
+
+          e.preventDefault();
+          controllerState.a = false;
+
+          iosocket.emit('controllerStateChange', { playerid: playerid, controllerState: controllerState });
+
+        }
+        document.body.addEventListener('mousedown', touchstart, false);
+        document.body.addEventListener('touchstart', touchstart, false);
+        document.body.addEventListener('MSPointerDown', touchstart, false);
+        document.body.addEventListener('mouseup', touchend, false);
+        document.body.addEventListener('touchend', touchend, false);
+        document.body.addEventListener('MSPointerUp', touchend, false);
+        window.ondevicemotion = function(event) {
+          var accelerationX = event.accelerationIncludingGravity.x;
+          var accelerationY = event.accelerationIncludingGravity.y;
+          var accelerationZ = event.accelerationIncludingGravity.z;
+
+          controllerState.accel.x = accelerationX / 100;
+          controllerState.accel.y = accelerationY / 100;
+          controllerState.accel.z = accelerationZ / 10;
+
+          iosocket.emit('controllerStateChange', { playerid: playerid, controllerState: controllerState });
+        }
+
+        $('#controller').html("Connected to game! Hold your phone on it's side and steer. Put your thumb/finger down anywhere on the screen to accelerate.")
+      }else{
+        $('#controller').html("Failed to connect to a game, is the game running? or is someone already connected? Try and scan the QR code again.")
+      }
+    })
+  });
+
+  document.getElementById('controller').style.display = "block"
+  document.getElementById('qrcode').style.display = "none"
+},
+game = function(ip){
+
+  var controllerState = {};
+  var iosocket = io.connect();
+  iosocket.on('connect', function () {
+
+    renderer = new THREE.WebGLRenderer({ antialias: true});
+
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+
+    scene = new THREE.Scene();
+
+    var camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 1, 10000);
+
+    renderer.shadowMapEnabled = true;
+    renderer.shadowMapSoft = true;
+    renderer.shadowMapType = THREE.PCFSoftShadowMap;
+    renderer.shadowCameraNear = 3;
+    renderer.shadowCameraFar = camera.far;
+    renderer.shadowCameraFov = 50;
+    renderer.shadowMapBias = 0.0039;
+    renderer.shadowMapDarkness = 0.5;
+    renderer.shadowMapWidth = 1024;
+    renderer.shadowMapHeight = 1024;
+
+    var loader = new THREE.JSONLoader();
+    var mesh;
+
+    loader.load(
+      'public/car.js',
+
+      function ( geometry, materials ) {
+        var material = new THREE.MeshFaceMaterial( materials );
+        mesh = new THREE.Mesh( geometry, material );
+        mesh.castShadow = true;
+        scene.add( mesh );
+
+        camera.position.z = mesh.position.z - 300;
+        camera.position.x = mesh.position.x / 2;
+        camera.position.y = (mesh.position.y / 2) + 100;
+        camera.lookAt(mesh.position);
+      }
+    );
+
+    scene.add(camera);
+
+    var plane = new THREE.Mesh(new THREE.PlaneGeometry(300,300), new THREE.MeshLambertMaterial({color: 0x22FF11}));
+    plane.rotation.x = -90 * (Math.PI / 180)
+    plane.receiveShadow = true;
+    scene.add(plane)
+    scene.add( new THREE.AmbientLight( 0x222222) );
+
+    var light = new THREE.DirectionalLight(0xffffff, 1);
+    light.position.y = 150;
+    light.position.x = -100;
+    light.position.z = 60;
+
+    light.castShadow = true;
+    // light.shadowCameraVisible = true;
+    light.shadowCameraRight =  300;
+    light.shadowCameraLeft = -300;
+    light.shadowCameraTop =  300;
+    light.shadowCameraBottom = -300;
+
+    scene.add(light);
+
+    var clock = new THREE.Clock();
+    var speed = 0;
+    var render = function () {
+
+      requestAnimationFrame(render);
+
+      renderer.render(scene, camera);
+
+      if(mesh){
+        if(controllerState){
+          if(controllerState.accel){
+            if(controllerState.accel.y){
+              mesh.rotateY(controllerState.accel.y * (speed / 2));
+            }
+            if(controllerState.a){
+              if(speed <= 2){
+                speed += 0.05;
+              }else{
+                speed = 2;
+              }
+            }else{
+              if(speed > 0){
+                speed -= 0.05;
+              }else{
+                speed = 0;
+              }
+            }
+          }
+        }
+
+        mesh.translateZ(speed);
+
+        if(mesh.position.x > 150){
+          mesh.position.x = 150;
+        }
+        if(mesh.position.x < -150){
+          mesh.position.x = -150;
+        }
+        if(mesh.position.z > 150){
+          mesh.position.z = 150;
+        }
+        if(mesh.position.z < -150){
+          mesh.position.z = -150;
+        }
+
+      }
+    }
+
+    render();
+
+    iosocket.emit('connectMe')
+
+    var createQR = function(id){
+
+      var qrcode = new QRCode("qrcode"),
+      //url = "http://" + ip + ":8080?id=" + id;
+      url = "http://cjonasw-phone-controller.herokuapp.com/?id=" + id;
+
+      qrcode.makeCode(url)
+
+      iosocket.removeListener('connectedMe', createQR);
+    }
+
+    // Attach a watch for new players
+    iosocket.on('connectedMe', createQR);
+
+    iosocket.on('controllerStateChange', function(state){
+
+      console.log(state)
+
+      controllerState = state;
+
+    })
+
+    iosocket.on('controllerConnected', function(success){
+
+      if(success){
+
+        $('#qrcode').hide()
+
+      }else{
+
+        $('#qrcode').show()
+
+        controllerState = {
+
+          a: false,
+          accel: {}
+        }
+
+      }
+
+    })
+  });
+
+}
+
+if(window.location.href.indexOf('?id=') > 0){
+
+  controller(window.location.href.split('?id=')[1])
+
+}else{
+
+  game("10.4.50.94");
+  //game("192.168.1.7");
+
+}
+
+
+</script>
+</html>

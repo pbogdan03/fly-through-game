@@ -1,0 +1,14 @@
+html{
+  -ms-touch-action: none;
+  -ms-user-select: none;
+}
+body {
+  margin: 0;
+}
+
+#qr {
+  position: absolute;
+  top: 0;
+  padding: 20px;
+  background: white;
+}
